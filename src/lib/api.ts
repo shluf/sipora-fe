@@ -289,6 +289,27 @@ export const validationApi = {
     return res.json();
   },
 
+  processFtp: async (targetDate: string, params: ValidationParams): Promise<ValidationResult> => {
+    const formData = new FormData();
+    formData.append("target_date", targetDate);
+    formData.append("coverage_threshold", String(params.coverage_threshold));
+    formData.append("max_distance", String(params.max_distance));
+    formData.append("outlier_method", params.outlier_method);
+    formData.append("outlier_threshold", String(params.outlier_threshold));
+
+    const res = await fetch(`${API_BASE}/api/validation/process-ftp`, { method: "POST", body: formData });
+    if (!res.ok) {
+      // Try to extract detail message from FastAPI error
+      let detail = `API Error: ${res.status} ${res.statusText}`;
+      try {
+        const errBody = await res.json();
+        if (errBody.detail) detail = errBody.detail;
+      } catch { /* ignore */ }
+      throw new Error(detail);
+    }
+    return res.json();
+  },
+
   getExportCsvUrl: () => `${API_BASE}/api/validation/export/csv`,
   getExportJsonUrl: () => `${API_BASE}/api/validation/export/json`,
 };

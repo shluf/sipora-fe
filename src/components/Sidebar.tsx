@@ -35,6 +35,11 @@ export default function Sidebar() {
         setValidationParams,
         validationLoading,
         handleValidationProcess,
+        ftpDate,
+        setFtpDate,
+        ftpLoading,
+        ftpError,
+        handleFtpProcess,
     } = useValidationContext();
 
     const qpe = useQpeContext();
@@ -363,6 +368,11 @@ export default function Sidebar() {
                                 onValidationParamsChange={setValidationParams}
                                 validationLoading={validationLoading}
                                 onValidationProcess={handleValidationProcess}
+                                ftpDate={ftpDate}
+                                onFtpDateChange={setFtpDate}
+                                ftpLoading={ftpLoading}
+                                ftpError={ftpError}
+                                onFtpProcess={handleFtpProcess}
                             />
                         </div>
                     )}

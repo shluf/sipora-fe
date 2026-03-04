@@ -46,8 +46,23 @@ function MapClickHandler({ onClick }: { onClick: (lat: number, lon: number) => v
 
 export type PickerMode = "wilayah" | "titik" | null;
 
+// Layer opacity config per type
+const LAYER_OPACITY: Record<string, number> = {
+    qpe: 0.85,
+    dbz: 0.85,
+    altitude: 0.70,
+    slope: 0.65,
+};
+const LAYER_LABELS: Record<string, string> = {
+    qpe: "QPE (mm/10min)",
+    dbz: "Reflektifitas (dBZ)",
+    altitude: "Ketinggian (m)",
+    slope: "Kemiringan (°)",
+};
+
 interface MapViewerProps {
-    imageData: SpatialData | null;
+    imageData?: SpatialData | null;       // legacy single-layer
+    imageLayers?: Array<{ layer: string; data: SpatialData }>;  // multi-layer
     geojson?: any;
     pickerMode: PickerMode;
     pickedPoint?: { lat: number; lon: number } | null;
@@ -58,9 +73,16 @@ interface MapViewerProps {
     boundaryWeight?: number;
 }
 
-export default function MapViewer({ imageData, geojson, pickerMode, pickedPoint, selectedAreaName, onPointPick, onAreaPick, legendMinimized, boundaryWeight = 0.8 }: MapViewerProps) {
+export default function MapViewer({ imageData, imageLayers, geojson, pickerMode, pickedPoint, selectedAreaName, onPointPick, onAreaPick, legendMinimized, boundaryWeight = 0.8 }: MapViewerProps) {
     const isDark = useTheme();
-    const bounds: L.LatLngBoundsExpression = imageData?.bounds || [
+
+    // Support both single imageData (legacy) and imageLayers (multi)
+    const layers = imageLayers && imageLayers.length > 0
+        ? imageLayers
+        : imageData ? [{ layer: "qpe", data: imageData }] : [];
+
+    const primaryData = layers[0]?.data ?? null;
+    const bounds: L.LatLngBoundsExpression = primaryData?.bounds || [
         [-8.60, 109.10],
         [-6.80, 111.90],
     ];
@@ -160,14 +182,16 @@ export default function MapViewer({ imageData, geojson, pickerMode, pickedPoint,
                     />
                 )}
 
-                {imageData && (
+                {/* Multi-layer image overlays */}
+                {layers.map(({ layer, data }, idx) => (
                     <ImageOverlay
-                        url={`data:${imageData.content_type};base64,${imageData.image_base64}`}
-                        bounds={bounds}
-                        opacity={0.85}
-                        zIndex={10}
+                        key={`${layer}-${data.timestamp}`}
+                        url={`data:${data.content_type};base64,${data.image_base64}`}
+                        bounds={data.bounds as L.LatLngBoundsExpression}
+                        opacity={LAYER_OPACITY[layer] ?? 0.85}
+                        zIndex={10 + idx}
                     />
-                )}
+                ))}
 
                 {/* Click handler for point picking */}
                 {pickerMode === "titik" && onPointPick && <MapClickHandler onClick={onPointPick} />}
@@ -183,41 +207,34 @@ export default function MapViewer({ imageData, geojson, pickerMode, pickedPoint,
                     </Marker>
                 )}
 
-                {/* Custom Legend */}
-                {imageData && imageData.legend && !legendMinimized && (
+                {/* Legends per layer */}
+                {layers.length > 0 && !legendMinimized && (
                     <div
                         className="leaflet-bottom leaflet-right"
-                        style={{ pointerEvents: "auto", zIndex: 1000, padding: "10px" }}
+                        style={{ pointerEvents: "auto", zIndex: 1000, padding: "10px", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}
                     >
-                        <div className="leaflet-control leaflet-bar" style={{ background: "var(--card)", padding: "10px", borderRadius: "var(--radius)", boxShadow: "var(--shadow-md)" }}>
-                            <h4 style={{ fontSize: "0.75rem", fontWeight: "bold", marginBottom: "0.5rem" }}>
-                                Legenda {imageData.image_base64.length > 0 && imageData.legend.values[0] === 5 ? "(dBZ)" : "(mm/10min)"}
-                            </h4>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.7rem", maxHeight: "250px", overflowY: "auto", paddingRight: "5px" }}>
-                                {imageData.legend.colors.map((color, idx) => {
-                                    const val1 = imageData.legend.values[idx];
-                                    const val2 = imageData.legend.values[idx + 1];
-                                    let label = "";
-                                    if (idx === 0) {
-                                        label = `0.0`;
-                                    } else if (idx === imageData.legend.colors.length - 1) {
-                                        label = `> ${val1}`;
-                                    } else {
-                                        label = `${val1} - ${val2 || ""}`;
-                                    }
-                                    return (
-                                        <div key={idx} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                            <span style={{
-                                                width: 12, height: 12,
-                                                background: color,
-                                                border: color === "#00000000" ? "1px solid #ccc" : "1px solid rgba(0,0,0,0.1)"
-                                            }}></span>
-                                            {label}
-                                        </div>
-                                    );
-                                })}
+                        {layers.map(({ layer, data }) => data.legend && (
+                            <div key={layer} className="leaflet-control leaflet-bar" style={{ background: "var(--card)", padding: "8px 10px", borderRadius: "var(--radius)", boxShadow: "var(--shadow-md)", minWidth: 120 }}>
+                                <h4 style={{ fontSize: "0.7rem", fontWeight: 700, marginBottom: "0.375rem", color: "var(--muted-foreground)" }}>
+                                    {LAYER_LABELS[layer] || layer}
+                                </h4>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "0.65rem", maxHeight: 200, overflowY: "auto" }}>
+                                    {data.legend.colors.map((color, idx) => {
+                                        if (color === "#00000000") return null;
+                                        const val1 = data.legend.values[idx];
+                                        const val2 = data.legend.values[idx + 1];
+                                        const label = idx === data.legend.colors.length - 1
+                                            ? `> ${val1}` : `${val1}–${val2 ?? ""}`;
+                                        return (
+                                            <div key={idx} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                                                <span style={{ width: 10, height: 10, flexShrink: 0, background: color, border: "1px solid rgba(0,0,0,0.1)" }} />
+                                                {label}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        </div>
+                        ))}
                     </div>
                 )}
             </MapContainer>

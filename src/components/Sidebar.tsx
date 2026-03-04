@@ -325,7 +325,7 @@ export default function Sidebar() {
                                     <Calendar size={12} style={{ display: "inline", marginRight: 4 }} />
                                     Rentang Waktu
                                 </h3>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                                     <div className="input-group">
                                         <label>Mulai</label>
                                         <input type="datetime-local" className="input-field" value={startDate} min={minDate} max={maxDate} onChange={(e) => onStartDateChange(e.target.value)} />

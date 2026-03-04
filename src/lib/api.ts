@@ -110,6 +110,14 @@ export const longsorApi = {
     apiFetch<ZonalData>(`/api/longsor/point?lat=${lat}&lon=${lon}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&mode=${mode}`),
   getSpatial: (timestamp: string, layer: string = "qpe", mode: AccumulationMode = "10min") =>
     apiFetch<SpatialData>(`/api/longsor/spatial?timestamp=${encodeURIComponent(timestamp)}&layer=${layer}&mode=${mode}`),
+  getTerrain: (params: { mode: "point" | "area"; lat?: number; lon?: number; area?: string; level?: string }) => {
+    const q = new URLSearchParams({ mode: params.mode });
+    if (params.lat != null) q.set("lat", String(params.lat));
+    if (params.lon != null) q.set("lon", String(params.lon));
+    if (params.area) q.set("area", params.area);
+    if (params.level) q.set("level", params.level);
+    return apiFetch<Record<string, number | null>>(`/api/longsor/terrain?${q.toString()}`);
+  },
   getExportUrl: (format: "csv" | "excel" | "json", area: string, start: string, end: string, options?: { level?: string; lat?: number; lon?: number; mode?: AccumulationMode }) => {
     // Reusing the general export url might require changing the export router to support longsor as a source, but for now we will just use the same export url or create a specific one if implemented later. The current export API only targets QPE.
     let url = `${API_BASE}/api/export/${format}?area=${encodeURIComponent(area)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&source=longsor`;

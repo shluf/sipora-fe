@@ -6,6 +6,7 @@ import {
 } from "@/lib/api";
 import { useLongsorContext } from "@/contexts/LongsorContext";
 import MetricCards from "@/components/MetricCards";
+import TerrainCards, { type TerrainInfo } from "@/components/TerrainCards";
 import TimeSeriesChart from "@/components/charts/TimeSeriesChart";
 import AccumulationChart from "@/components/charts/AccumulationChart";
 import IntensityBarChart from "@/components/charts/IntensityBarChart";
@@ -22,10 +23,21 @@ export default function LongsorAnalyticsPage() {
 
     // ── Local State ──
     const [zonalData, setZonalData] = useState<ZonalData | null>(null);
+    const [terrainData, setTerrainData] = useState<TerrainInfo | null>(null);
     const [loading, setLoading] = useState(false);
     const [localError, setLocalError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState(0);
     const [exportContext, setExportContext] = useState<{ level?: string; lat?: number; lon?: number; mode?: AccumulationMode }>({});
+
+    // ── Terrain fetch helper ──
+    const fetchTerrain = async (mode: "point" | "area", params: { lat?: number; lon?: number; area?: string }) => {
+        try {
+            const t = await longsorApi.getTerrain({ mode, ...params });
+            setTerrainData(t as TerrainInfo);
+        } catch {
+            setTerrainData(null);
+        }
+    };
 
     // ── Visualize ──
     const handleVisualize = async () => {
@@ -37,6 +49,7 @@ export default function LongsorAnalyticsPage() {
                 const data = await longsorApi.getPointStats(customPoint.lat, customPoint.lon, startDate, endDate, accumulationMode);
                 setZonalData(data);
                 setExportContext({ lat: customPoint.lat, lon: customPoint.lon, mode: accumulationMode });
+                await fetchTerrain("point", { lat: customPoint.lat, lon: customPoint.lon });
             } catch (e) {
                 setLocalError(e instanceof Error ? e.message : "Failed to load point data");
             } finally {
@@ -50,6 +63,7 @@ export default function LongsorAnalyticsPage() {
                 const data = await longsorApi.getZonalStats(selectedArea, startDate, endDate, "kabupaten", accumulationMode);
                 setZonalData(data);
                 setExportContext({ mode: accumulationMode });
+                await fetchTerrain("area", { area: selectedArea });
             } catch (e) {
                 setLocalError(e instanceof Error ? e.message : "Failed to load data");
                 setLoading(false);
@@ -73,6 +87,7 @@ export default function LongsorAnalyticsPage() {
                 const data = await longsorApi.getZonalStats(kecamatan, startDate, endDate, "kecamatan", accumulationMode);
                 setZonalData(data);
                 setExportContext({ level: "kecamatan", mode: accumulationMode });
+                await fetchTerrain("area", { area: kecamatan });
             } else {
                 const kabName = kabupaten || areaName;
                 const matchedArea = boundaries?.areas.find(a =>
@@ -80,9 +95,11 @@ export default function LongsorAnalyticsPage() {
                     kabName.toLowerCase().includes(a.toLowerCase()) ||
                     a.toLowerCase().includes(kabName.toLowerCase())
                 );
-                const data = await longsorApi.getZonalStats(matchedArea || kabName, startDate, endDate, "kabupaten", accumulationMode);
+                const resolvedArea = matchedArea || kabName;
+                const data = await longsorApi.getZonalStats(resolvedArea, startDate, endDate, "kabupaten", accumulationMode);
                 setZonalData(data);
                 setExportContext({ mode: accumulationMode });
+                await fetchTerrain("area", { area: resolvedArea });
             }
         } catch (e) {
             setLocalError(e instanceof Error ? e.message : "Failed to load area data");
@@ -99,6 +116,7 @@ export default function LongsorAnalyticsPage() {
             const data = await longsorApi.getPointStats(lat, lon, startDate, endDate, accumulationMode);
             setZonalData(data);
             setExportContext({ lat, lon, mode: accumulationMode });
+            await fetchTerrain("point", { lat, lon });
         } catch (e) {
             setLocalError(e instanceof Error ? e.message : "Failed to load point data");
         } finally {
@@ -174,6 +192,15 @@ export default function LongsorAnalyticsPage() {
                         </div>
 
                         <MetricCards summary={zonalData.summary} />
+
+                        {terrainData && (
+                            <div>
+                                <h3 style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                    Informasi Terrain
+                                </h3>
+                                <TerrainCards terrain={terrainData} isPointMode={pointMode} />
+                            </div>
+                        )}
 
                         <div className="card" style={{ padding: "1.5rem" }}>
                             <div className="tabs">

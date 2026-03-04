@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Minus, Maximize2, Layers, ChevronLeft, ChevronRight, MapPin, Map, Edit3, Check, X, Calendar as CalendarIcon, SlidersHorizontal, Fullscreen, Shrink, ChevronDown } from "lucide-react";
-import { api, type SpatialData, type AccumulationMode } from "@/lib/api";
+import { api, type AccumulationMode } from "@/lib/api";
 import dynamic from "next/dynamic";
 import CustomDatePicker from "./CustomDatePicker";
 import type { PickerMode } from "./MapViewer";
@@ -34,8 +34,8 @@ const MODE_LABELS: Record<AccumulationMode, string> = { "10min": "10 Menit", hou
 
 export default function SpatialMap({ timestamps, defaultTimestamp, startDate, endDate, onAreaSelect, onPointSelect, panelOpen, accumulationMode = "10min", onAccumulationModeChange, backendApi = api, enableTopography = false }: SpatialMapProps) {
     const [selectedTs, setSelectedTs] = useState(defaultTimestamp || timestamps[timestamps.length - 1] || "");
-    const [activeLayer, setActiveLayer] = useState("qpe");
-    const [imageData, setImageData] = useState<SpatialData | null>(null);
+    const [activeLayers, setActiveLayers] = useState<Set<string>>(new Set(["qpe"]));
+    const [imageLayersData, setImageLayersData] = useState<Array<{ layer: string; data: any }>>([]);
     const [loading, setLoading] = useState(false);
     const [minimized, setMinimized] = useState(false);
     const [panelHeight, setPanelHeight] = useState(520);
@@ -165,32 +165,34 @@ export default function SpatialMap({ timestamps, defaultTimestamp, startDate, en
         setIsEditingDate(false);
     };
 
-    // Auto-load spatial data
-    const loadMap = useCallback(async (ts: string, layer: string, mode: AccumulationMode) => {
-        if (!ts) return;
+    // Auto-load spatial data (all active layers in parallel)
+    const loadMap = useCallback(async (ts: string, layers: Set<string>, mode: AccumulationMode) => {
+        if (!ts || layers.size === 0) return;
         if (abortRef.current) abortRef.current.abort();
         const controller = new AbortController();
         abortRef.current = controller;
 
         setLoading(true);
         try {
-            const data = await backendApi.getSpatial(ts, layer, mode);
+            const results = await Promise.all(
+                Array.from(layers).map(layer =>
+                    backendApi.getSpatial(ts, layer, mode)
+                        .then((data: any) => ({ layer, data }))
+                        .catch(() => null)
+                )
+            );
             if (!controller.signal.aborted) {
-                setImageData(data);
+                setImageLayersData(results.filter(Boolean) as any);
             }
         } catch (e: any) {
-            if (e?.name !== "AbortError") {
-                console.error("Failed to load spatial data", e);
-            }
+            if (e?.name !== "AbortError") console.error("Failed to load spatial data", e);
         } finally {
-            if (!controller.signal.aborted) {
-                setLoading(false);
-            }
+            if (!controller.signal.aborted) setLoading(false);
         }
-    }, []);
+    }, [backendApi]);
 
     useEffect(() => {
-        if (selectedTs) loadMap(selectedTs, activeLayer, accumulationMode);
+        if (selectedTs) loadMap(selectedTs, activeLayers, accumulationMode);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Load GeoJSON boundaries
@@ -204,10 +206,10 @@ export default function SpatialMap({ timestamps, defaultTimestamp, startDate, en
     // Auto-render on change (debounced)
     useEffect(() => {
         const timer = setTimeout(() => {
-            if (selectedTs) loadMap(selectedTs, activeLayer, accumulationMode);
+            if (selectedTs) loadMap(selectedTs, activeLayers, accumulationMode);
         }, 300);
         return () => clearTimeout(timer);
-    }, [selectedTs, activeLayer, accumulationMode, loadMap]);
+    }, [selectedTs, activeLayers, accumulationMode, loadMap]);
 
     const handleSlider = (e: React.ChangeEvent<HTMLInputElement>) => {
         const idx = parseInt(e.target.value);
@@ -422,25 +424,48 @@ export default function SpatialMap({ timestamps, defaultTimestamp, startDate, en
                 <Layers size={14} style={{ color: "var(--primary)", flexShrink: 0 }} />
                 <span style={{ fontSize: "0.8125rem", fontWeight: 700, whiteSpace: "nowrap" }}>Peta Spasial</span>
 
-                {/* Layer Toggle */}
-                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                    <select
-                        value={activeLayer}
-                        onChange={(e) => setActiveLayer(e.target.value)}
-                        style={{
-                            appearance: "none", WebkitAppearance: "none",
-                            padding: "0.2rem 1.5rem 0.2rem 0.5rem", fontSize: "0.6875rem",
-                            fontWeight: 600, border: "1px solid var(--border)",
-                            borderRadius: "999px", background: "transparent",
-                            color: "var(--primary)", cursor: "pointer", outline: "none",
-                        }}
-                    >
-                        <option value="qpe">Curah Hujan (QPE)</option>
-                        <option value="dbz" disabled={accumulationMode !== "10min"}>Reflektifitas (dBZ)</option>
-                        {enableTopography && <option value="altitude">Ketinggian (DEM)</option>}
-                        {enableTopography && <option value="slope">Kemiringan Lereng</option>}
-                    </select>
-                    <ChevronDown size={10} style={{ position: "absolute", right: 6, pointerEvents: "none", color: "var(--primary)" }} />
+                {/* Layer Toggle — pill multi-select */}
+                <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap", alignItems: "center" }}>
+                    {[
+                        { key: "qpe", label: "QPE" },
+                        { key: "dbz", label: "dBZ", disabled: accumulationMode !== "10min" },
+                        ...(enableTopography ? [
+                            { key: "altitude", label: "Ketinggian" },
+                            { key: "slope", label: "Lereng" },
+                        ] : []),
+                    ].map(({ key, label, disabled }) => {
+                        const active = activeLayers.has(key);
+                        return (
+                            <button
+                                key={key}
+                                disabled={disabled}
+                                onClick={() => {
+                                    setActiveLayers(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(key)) {
+                                            if (next.size > 1) next.delete(key); // min 1 layer
+                                        } else {
+                                            next.add(key);
+                                        }
+                                        return next;
+                                    });
+                                    if (disabled) return;
+                                    if (key === "dbz" && accumulationMode !== "10min") return;
+                                }}
+                                style={{
+                                    padding: "0.2rem 0.5rem", fontSize: "0.6875rem", fontWeight: 600,
+                                    borderRadius: "999px", cursor: disabled ? "not-allowed" : "pointer",
+                                    border: `1px solid ${active && !disabled ? "var(--primary)" : "var(--border)"}`,
+                                    background: active && !disabled ? "var(--primary)" : "transparent",
+                                    color: active && !disabled ? "white" : disabled ? "var(--border)" : "var(--foreground)",
+                                    transition: "all 0.15s",
+                                    opacity: disabled ? 0.5 : 1,
+                                }}
+                            >
+                                {label}
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {/* Mode selector dropdown */}
@@ -450,7 +475,15 @@ export default function SpatialMap({ timestamps, defaultTimestamp, startDate, en
                         onChange={(e) => {
                             const m = e.target.value as AccumulationMode;
                             onAccumulationModeChange?.(m);
-                            if (m !== "10min" && activeLayer === "dbz") setActiveLayer("qpe");
+                            // Remove dbz layer if switching away from 10min
+                            if (m !== "10min") {
+                                setActiveLayers(prev => {
+                                    const next = new Set(prev);
+                                    next.delete("dbz");
+                                    if (next.size === 0) next.add("qpe");
+                                    return next;
+                                });
+                            }
                         }}
                         style={{
                             appearance: "none",
@@ -694,7 +727,7 @@ export default function SpatialMap({ timestamps, defaultTimestamp, startDate, en
             {/* Map Area */}
             <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
                 <MapViewer
-                    imageData={imageData}
+                    imageLayers={imageLayersData}
                     geojson={geojson}
                     pickerMode={pickerMode}
                     pickedPoint={pickedPoint}
